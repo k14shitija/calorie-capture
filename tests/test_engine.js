@@ -93,6 +93,31 @@ run("badges unlock from real actions", () => {
   assert.ok(ids.includes("social"));
 });
 
+run("persona follows motive and experience", () => {
+  assert.strictEqual(E.pickPersona({ motive: "competition", experience: "advanced", goal: "lose" }), "challenger");
+  assert.strictEqual(E.pickPersona({ motive: "progress", experience: "beginner", goal: "healthy" }), "beginner");
+  assert.strictEqual(E.pickPersona({ motive: "progress", experience: "intermediate", goal: "muscle" }), "builder");
+});
+
+run("XP table and gram scaling stay consistent", () => {
+  assert.strictEqual(E.xpFor("set"), 20);
+  assert.strictEqual(E.xpFor("meal"), 25);
+  const food = globalThis.CC_DATA.FOODS.find((f) => f.id === "grilled-chicken");
+  const half = E.scaleByGrams(food, food.grams / 2);
+  assert.ok(half.kcal < food.kcal);
+});
+
+run("insights speak in remaining calories", () => {
+  const info = E.insightCopy({
+    targets: { calories: 1850, protein: 90 },
+    meals: [{ at: new Date().toISOString(), kcal: 1420, protein: 62 }],
+    session: { exercises: [{ sets: [{ done: true }, { done: false }] }] },
+    profile: { persona: "beginner" }
+  });
+  assert.ok(info.remain === 430);
+  assert.ok(info.lines[0].includes("430"));
+});
+
 run("reminders match clock time", () => {
   const due = E.reminderDue(
     [{ id: "lunch", label: "Log lunch", time: "13:00", enabled: true }],

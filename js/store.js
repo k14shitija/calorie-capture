@@ -18,7 +18,7 @@
       joinedChallenges: [],
       completedRoutine: false,
       routines: [],
-      theme: "dark",
+      theme: "light",
       csat: [],
       seenWelcome: false,
       lastNotify: {}

@@ -45,7 +45,7 @@
     if (!kg || !cm) bmr = 1700;
     const tdee = Math.round(bmr * activityFactor(profile.activity));
     const goal = profile.goal || "lose";
-    const delta = goal === "lose" ? -400 : goal === "gain" ? 300 : 0;
+    const delta = goal === "lose" ? -400 : (goal === "gain" || goal === "muscle" || goal === "stronger") ? 250 : 0;
     const calories = clamp(Math.round(tdee + delta), 1200, 4000);
     return {
       bmr: Math.round(bmr),
@@ -304,6 +304,62 @@
     return days;
   }
 
+  function pickPersona(answers) {
+    if (answers.motive === "competition" || answers.motive === "rewards") return "challenger";
+    if (answers.experience === "beginner") return "beginner";
+    if (answers.goal === "muscle" || answers.goal === "stronger") return "builder";
+    if (answers.motive === "streaks" || answers.goal === "consistency") return "consistency";
+    return "balanced";
+  }
+
+  function insightCopy(state) {
+    const t = state.targets || { calories: 1850, protein: 90 };
+    const meals = (state.meals || []).filter((m) => todayKey(m.at) === todayKey());
+    const eaten = meals.reduce((s, m) => s + (m.kcal || 0), 0);
+    const protein = meals.reduce((s, m) => s + (m.protein || 0), 0);
+    const remain = Math.max(0, (t.calories || 1850) - eaten);
+    const proteinGap = Math.max(0, (t.protein || 90) - protein);
+    const session = state.session;
+    let setsLeft = 0;
+    if (session && session.exercises) {
+      session.exercises.forEach((ex) => {
+        (ex.sets || []).forEach((set) => { if (!set.done) setsLeft += 1; });
+      });
+    }
+    const persona = (state.profile && state.profile.persona) || "beginner";
+    const lines = [
+      remain > 0
+        ? `You're ${remain} calories away from today's target.`
+        : "You're currently within your planned calorie range.",
+      proteinGap > 0 ? `You're ${proteinGap}g short of your protein target.` : "Protein is on track today.",
+      setsLeft > 0 ? `Two more sets and today's workout is closer — ${setsLeft} sets left.` : "No open sets. You can start today's workout when ready."
+    ];
+    if (persona === "challenger") lines.push("Your circle is logging. A session today keeps the board honest.");
+    if (persona === "beginner") lines.push("You only need the next clear step — not a perfect hour.");
+    if (persona === "consistency") lines.push("One logged meal keeps the streak kind, not punishing.");
+    return { remain, eaten, protein, proteinGap, setsLeft, lines };
+  }
+
+  function xpFor(kind) {
+    return (DATA.XP && DATA.XP[kind]) || 0;
+  }
+
+  function scaleByGrams(food, grams) {
+    const base = food.grams || 100;
+    const factor = (Number(grams) || base) / base;
+    return {
+      id: food.id,
+      name: food.name,
+      serving: `${grams}g`,
+      grams: Number(grams) || base,
+      portion: factor,
+      kcal: Math.round(food.kcal * factor),
+      protein: Math.round(food.protein * factor),
+      carbs: Math.round(food.carbs * factor),
+      fat: Math.round(food.fat * factor)
+    };
+  }
+
   function reminderDue(reminders, now) {
     const t = now || new Date();
     const hh = String(t.getHours()).padStart(2, "0");
@@ -331,6 +387,10 @@
     earnedBadges,
     weekSeries,
     reminderDue,
+    pickPersona,
+    insightCopy,
+    xpFor,
+    scaleByGrams,
     clamp
   };
 

@@ -72,8 +72,8 @@
 
   function nav(active) {
     const items = [
-      ["#/", "home", "⌂", "Home"],
-      ["#/log", "log", "◎", "Capture"],
+      ["#/", "home", "⌂", "Today"],
+      ["#/log", "log", "◎", "Snap"],
       ["#/gym", "gym", "🏋", "Gym"],
       ["#/plan", "plan", "🗒", "Plan"],
       ["#/you", "you", "●", "You"]
@@ -85,10 +85,10 @@
 
   function topbar(subtitle) {
     return `<div class="topbar">
-      <div class="brand">
+      <a class="brand" href="#/welcome">
         <img src="assets/logo.svg" alt="" />
         <div>CalorieCapture<small>${esc(subtitle)}</small></div>
-      </div>
+      </a>
       <button class="icon-btn" data-act="theme" aria-label="Toggle theme">${state.theme === "light" ? "☾" : "☼"}</button>
     </div>`;
   }
@@ -99,28 +99,57 @@
     const c = 2 * Math.PI * r;
     const dash = (c * p).toFixed(1);
     return `<svg width="140" height="140" viewBox="0 0 140 140" aria-hidden="true">
-      <circle cx="70" cy="70" r="${r}" fill="none" stroke="rgba(186,230,204,0.12)" stroke-width="12"/>
-      <circle cx="70" cy="70" r="${r}" fill="none" stroke="#3ee08f" stroke-width="12" stroke-linecap="round" stroke-dasharray="${dash} ${c}"/>
+      <circle cx="70" cy="70" r="${r}" fill="none" stroke="rgba(226,90,56,0.16)" stroke-width="12"/>
+      <circle cx="70" cy="70" r="${r}" fill="none" stroke="#e25a38" stroke-width="12" stroke-linecap="round" stroke-dasharray="${dash} ${c}"/>
     </svg>`;
   }
 
   function renderWelcome() {
-    root.innerHTML = `<section class="hero">
-      <div class="kicker">ISE 588 · Team Red MVP</div>
-      <h1>Log a meal in one photo. Learn a machine in one minute.</h1>
-      <p>CalorieCapture is built for busy beginners. Snap dinner, set the plate size, get an on-device calorie estimate, then walk into the gym with a short tutorial instead of guessing.</p>
-      <div class="feature-grid two">
-        <div class="feature"><div class="badge-dot">🍽️</div><div><b>Effortless meal logging</b><div class="muted">Photo + plate size. Edit if the estimate misses a side.</div></div></div>
-        <div class="feature"><div class="badge-dot">🏋️</div><div><b>Gym confidence</b><div class="muted">Search or scan a machine. Get steps, mistakes, and calories out.</div></div></div>
-        <div class="feature"><div class="badge-dot">🔥</div><div><b>Progress you can see</b><div class="muted">Calories in vs out, streaks, badges, and habit reminders.</div></div></div>
-        <div class="feature"><div class="badge-dot">🗺️</div><div><b>A plan for today</b><div class="muted">Pick a goal and time. Get a beginner routine in one tap.</div></div></div>
+    root.className = "app site";
+    root.innerHTML = `<header class="site-bar">
+        <div class="brand"><img src="assets/logo.svg" alt="" /><div>CalorieCapture<small>for busy beginners</small></div></div>
+        <button class="icon-btn" data-act="theme" aria-label="Toggle theme">${state.theme === "light" ? "☾" : "☼"}</button>
+      </header>
+      <section class="site-hero">
+        <div>
+          <p class="eyebrow">Snap. Learn. Stay consistent.</p>
+          <h1>The plate is the log. The machine has a guide.</h1>
+          <p class="lede">Photograph dinner, set the plate size, and get an on-device calorie read. At the gym, search or scan a machine and follow a one-minute tutorial — no trainer required.</p>
+        </div>
+        <div class="phone-wrap" aria-hidden="true">
+          <div class="phone">
+            <div class="phone-notch"></div>
+            <div class="phone-body">
+              <p class="tiny">Today</p>
+              <div class="phone-ring">1,240</div>
+              <div class="phone-pills"><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <div class="story-row">
+        <article class="story s1"><b>One photo</b>Plate size makes the portion honest. Edit if a side was missed.</article>
+        <article class="story s2"><b>Gym confidence</b>Search or scan a machine. Get steps, mistakes, and calories out.</article>
+        <article class="story s3"><b>In vs out</b>A home screen that shows meals, movement, water, and streak.</article>
+        <article class="story s4"><b>A plan for today</b>Pick a goal and a time. Get a beginner routine in one tap.</article>
       </div>
-      <div class="btn-row">
-        <button class="btn btn-primary" data-act="start">Create my plan</button>
-        <button class="btn" data-act="demo">Try as John, the busy parent</button>
-      </div>
-      <p class="tiny">Works on your phone and desktop. Data stays in this browser. Add it to your home screen for the app feel.</p>
-    </section>`;
+      <section class="card" style="margin-top:8px">
+        <h2>How a day feels</h2>
+        <div class="how">
+          <div class="how-item"><em>1</em><div><b>Before the gym</b><div class="muted">Open a short machine guide so the first set is setup, not guessing.</div></div></div>
+          <div class="how-item"><em>2</em><div><b>At the rack</b><div class="muted">Scan or search the machine. Mark the tutorial watched. Log the minutes.</div></div></div>
+          <div class="how-item"><em>3</em><div><b>Home, takeout in hand</b><div class="muted">Snap the plate. Get calories in. See them next to calories out.</div></div></div>
+          <div class="how-item"><em>4</em><div><b>A quiet nudge</b><div class="muted">Reminders for lunch, water, and a ten-minute walk — not a pile of ads.</div></div></div>
+        </div>
+      </section>
+      <section class="card quote-card">
+        <p>“This is awesome — it helps me record how much I take in with one picture.”</p>
+        <div class="tiny" style="margin-top:10px">What first-time users asked for next: plate size, a cleaner home, and a friend challenge. Those are in the app.</div>
+      </section>
+      <div class="site-cta">
+        <button class="btn btn-primary" data-act="start">${state.profile ? "Back to today" : "Start free"}</button>
+        <button class="btn" data-act="${state.profile ? "goto-today" : "demo"}">${state.profile ? "Open dashboard" : "Try a sample day"}</button>
+      </div>`;
   }
 
   function renderOnboarding() {
@@ -197,6 +226,25 @@
     });
   }
 
+  function hourGreeting() {
+    const h = new Date().getHours();
+    if (h < 11) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  }
+
+  function suggestions() {
+    const names = state.meals.slice(0, 16).flatMap((m) => (m.items || []).map((i) => i.name));
+    const lastGym = state.tutorials[state.tutorials.length - 1];
+    const food = names[0] || "a plate photo";
+    const machine = lastGym ? D.EQUIPMENT.find((e) => e.id === lastGym) : D.EQUIPMENT.find((e) => e.id === "treadmill");
+    return [
+      { href: "#/log", title: `Log ${food} again`, detail: "Your recent meals train the next estimate." },
+      { href: `#/gym/${machine ? machine.id : "treadmill"}`, title: machine ? `Repeat ${machine.name}` : "Open a gym guide", detail: "A two-minute reread beats guessing the seat height." },
+      { href: "#/plan", title: "Generate tonight’s routine", detail: "20 minutes. Beginner mix. Calories out included." }
+    ];
+  }
+
   function renderHome() {
     const t = state.targets || E.estimateTargets(state.profile || {});
     const { inK, outK } = todayTotals();
@@ -209,20 +257,31 @@
     const week = E.weekSeries(state.meals);
     const quote = D.QUOTES[new Date().getDate() % D.QUOTES.length];
     const meals = todayMeals();
+    const workouts = todayWorkouts();
+    const recs = suggestions();
     root.innerHTML = `${topbar("Today")}
       ${nav("home")}
       <div class="main grid">
-        <section class="card">
-          <div class="row"><h2>Calories in vs out</h2><span class="chip">${esc(state.profile.name)} · ${streak} day streak</span></div>
+        <section class="hello">
+          <h1>${hourGreeting()}, ${esc((state.profile.name || "there").split(" ")[0])}.</h1>
+          <p>${esc(quote)}</p>
+        </section>
+        <section class="card hero-card">
+          <div class="row"><h2>In vs out</h2><span class="chip">${streak} day streak</span></div>
           <div class="rings">
-            <div class="ring-wrap">${ringSvg(pct)}<div class="ring-center"><strong>${remaining}</strong><div class="tiny">left</div></div></div>
+            <div class="ring-wrap">${ringSvg(pct)}<div class="ring-center"><strong>${remaining}</strong><div class="tiny">kcal left</div></div></div>
             <div class="stat-col">
               <div><div class="stat"><span>Eaten</span><b>${inK}</b></div><div class="bar in"><span style="width:${E.clamp(inK / t.calories * 100, 0, 100)}%"></span></div></div>
               <div><div class="stat"><span>Burned</span><b>${outK}</b></div><div class="bar out"><span style="width:${E.clamp(outK / 600 * 100, 0, 100)}%"></span></div></div>
-              <div><div class="stat"><span>Target</span><b>${t.calories}</b></div></div>
-              <p class="tiny">${esc(quote)}</p>
+              <div><div class="stat"><span>Daily target</span><b>${t.calories}</b></div></div>
             </div>
           </div>
+        </section>
+        <section class="card">
+          <div class="row"><h2>For you</h2><a href="#/welcome">See the homepage</a></div>
+          <div class="reco" style="margin-top:8px">${recs.map((r) =>
+            `<a class="reco-item" href="${r.href}"><b>${esc(r.title)}</b><div class="tiny">${esc(r.detail)}</div></a>`
+          ).join("")}</div>
         </section>
         <section class="card">
           <div class="row"><h2>This week</h2><a href="#/history">History</a></div>
@@ -232,18 +291,24 @@
           }).join("")}</div>
         </section>
         <section class="card">
-          <div class="row"><h2>Water</h2><span class="tiny">${water}/${t.water} glasses</span></div>
+          <div class="row"><h2>Water</h2><span class="tiny">${water}/${t.water}</span></div>
           <div class="water-row">${Array.from({ length: t.water }, (_, i) =>
             `<button class="drop ${i < water ? "on" : ""}" data-act="water" data-n="${i + 1}">💧</button>`).join("")}</div>
         </section>
         <section class="card">
-          <div class="row"><h2>Today's plates</h2><a href="#/log">Add</a></div>
+          <div class="row"><h2>Plates today</h2><a href="#/log">Snap</a></div>
           ${meals.length ? `<div class="list">${meals.map((m) =>
-            `<div class="list-item"><div>${m.thumb ? `<img src="${m.thumb}" alt="" style="width:44px;height:44px;border-radius:10px;object-fit:cover">` : "🍽️"}</div><div><b>${esc(m.slot)}</b><div class="tiny">${esc((m.items || []).map((i) => i.name).join(", "))}</div></div><b>${m.kcal}</b></div>`
-          ).join("")}</div>` : `<p class="muted">No meals yet. Capture a plate — plate size makes the portion smarter.</p>`}
+            `<div class="list-item"><div>${m.thumb ? `<img src="${m.thumb}" alt="" style="width:44px;height:44px;border-radius:12px;object-fit:cover">` : "🍽️"}</div><div><b>${esc(m.slot)}</b><div class="tiny">${esc((m.items || []).map((i) => i.name).join(", "))}</div></div><b>${m.kcal}</b></div>`
+          ).join("")}</div>` : `<p class="muted">Nothing yet. Photograph a plate — size is what makes the portion smart.</p>`}
         </section>
         <section class="card">
-          <div class="row"><h2>Badges</h2><span class="tiny">${badges.length}/${D.BADGES.length}</span></div>
+          <div class="row"><h2>Movement today</h2><a href="#/gym">Gym</a></div>
+          ${workouts.length ? `<div class="list">${workouts.map((w) =>
+            `<div class="list-item"><div>🏋️</div><div><b>${esc(w.name)}</b><div class="tiny">${w.minutes} min</div></div><b>${w.kcal}</b></div>`
+          ).join("")}</div>` : `<p class="muted">No session yet. Scan a machine or generate a 20-minute plan.</p>`}
+        </section>
+        <section class="card">
+          <div class="row"><h2>Marks</h2><span class="tiny">${badges.length}/${D.BADGES.length}</span></div>
           <div class="badges">${D.BADGES.map((b) => {
             const on = badges.some((x) => x.id === b.id);
             return `<div class="badge ${on ? "" : "off"}">${b.icon} <b>${esc(b.name)}</b><div class="tiny">${esc(b.detail)}</div></div>`;
@@ -408,18 +473,57 @@
     });
   }
 
-  function renderGym(query) {
+  function eqTone(eq) {
+    if (/treadmill|bike|elliptical|rower|stair/.test(eq.id)) return "cardio";
+    if (/lat|row|pull|face/.test(eq.id)) return "pull";
+    if (/plank/.test(eq.id)) return "core";
+    return "strength";
+  }
+
+  function suggestEquipment(shares) {
+    const dark = (shares.dark || 0) + (shares.brown || 0);
+    if (dark > 0.35) return ["leg-press", "chest-press", "lat-pulldown"];
+    if ((shares.white || 0) > 0.28) return ["treadmill", "bike", "elliptical"];
+    return ["treadmill", "goblet-squat", "plank"];
+  }
+
+  function renderGym(query, scanHits) {
     const list = E.findEquipment(query || "");
-    root.innerHTML = `${topbar("Learn the machine")}
+    root.innerHTML = `${topbar("Gym floor")}
       ${nav("gym")}
-      <div class="main">
+      <div class="main grid">
+        <section class="card">
+          <h2>Scan a machine</h2>
+          <p class="muted">Photograph the unit. We suggest two or three beginner guides — you pick the match.</p>
+          <div class="photo-box" style="min-height:140px;margin-top:10px">
+            <div><b>Tap to scan</b><div class="tiny">Stays on this phone.</div></div>
+            <input id="eq-photo" type="file" accept="image/*" capture="environment" />
+          </div>
+          ${scanHits && scanHits.length ? `<div class="eq-grid" style="margin-top:12px">${scanHits.map((eq) =>
+            `<a class="eq-card ${eqTone(eq)}" href="#/gym/${eq.id}"><b>${esc(eq.name)}</b><span>${esc(eq.difficulty)} · ${eq.kcalPerMin} kcal/min</span></a>`
+          ).join("")}</div>` : ""}
+        </section>
         <input class="search" id="gym-q" placeholder="Treadmill, lat pulldown, beginner..." value="${esc(query || "")}" />
-        <div class="list">${list.map((eq) =>
-          `<a class="list-item" href="#/gym/${eq.id}"><div>🏋️</div><div><b>${esc(eq.name)}</b><div class="tiny">${esc(eq.muscles.join(" · "))} · ${esc(eq.difficulty)}</div></div><b>${eq.kcalPerMin}/min</b></a>`
+        <div class="eq-grid">${list.map((eq) =>
+          `<a class="eq-card ${eqTone(eq)}" href="#/gym/${eq.id}"><b>${esc(eq.name)}</b><span>${esc(eq.muscles[0])} · ${esc(eq.difficulty)}</span></a>`
         ).join("")}</div>
       </div>`;
     const input = document.getElementById("gym-q");
-    if (input) input.addEventListener("input", (ev) => renderGym(ev.target.value));
+    if (input) input.addEventListener("input", (ev) => renderGym(ev.target.value, scanHits));
+    const photo = document.getElementById("eq-photo");
+    if (photo) photo.addEventListener("change", async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      try {
+        const classified = await sharesFromFile(file);
+        const ids = suggestEquipment(classified.shares);
+        const hits = ids.map((id) => D.EQUIPMENT.find((e) => e.id === id)).filter(Boolean);
+        renderGym(query, hits);
+        toast("Here are likely matches. Open the one you are standing at.");
+      } catch (err) {
+        toast("Could not read that photo.");
+      }
+    });
   }
 
   function renderTutorial(id) {
@@ -521,6 +625,7 @@
           <p class="muted">${esc(state.profile.goal)} · ${t.calories} kcal target · ${days.length} active days</p>
           <div class="btn-row" style="margin-top:10px">
             <button class="btn" data-act="notify">Enable reminders</button>
+            <a class="btn" href="#/welcome">Homepage</a>
             <a class="btn" href="#/challenges">Challenges</a>
             <a class="btn" href="#/history">History</a>
           </div>
@@ -539,7 +644,7 @@
             <button class="btn" data-act="export">Download my data</button>
             <button class="btn" data-act="reset">Reset app</button>
           </div>
-          <p class="tiny" style="margin-top:10px">Estimates are educational, not medical advice. Team Red · ISE 588.</p>
+          <p class="tiny" style="margin-top:10px">Estimates are educational, not medical advice.</p>
         </section>
       </div>`;
   }
@@ -620,11 +725,12 @@
   function render() {
     applyTheme();
     const r = route();
-    if (!state.profile && r.name !== "onboarding") {
+    root.className = "app";
+    if (r.name === "welcome" || (!state.profile && r.name !== "onboarding")) {
       renderWelcome();
       return;
     }
-    if (r.name === "onboarding" || (!state.profile && r.name === "onboarding")) {
+    if (r.name === "onboarding") {
       if (!state.draftProfile) state.draftProfile = { name: "", age: 34, sex: "male", goal: "lose", activity: "sedentary", weight: 190, weightUnit: "lb", height: 70, heightUnit: "in" };
       renderOnboarding();
       return;
@@ -648,8 +754,11 @@
     const act = btn.dataset.act;
     if (act === "start") {
       state.seenWelcome = true;
-      go("#/onboarding");
+      persist();
+      if (state.profile) go("#/");
+      else go("#/onboarding");
     }
+    if (act === "goto-today") go("#/");
     if (act === "demo") startDemo();
     if (act === "goal") {
       state.draftProfile = collectOnboard();

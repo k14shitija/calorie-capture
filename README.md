@@ -1,6 +1,6 @@
 # CalorieCapture
 
-Phone-and-desktop fitness app from the ISE 588 Team Red product deck.
+Phone-and-desktop fitness app: one-tap meal photos, gym-machine tutorials, and a progress home.
 
 One-tap meal photos, gym-machine tutorials, calories in vs out, habit reminders, and a beginner routine generator. Static PWA — no backend, no build step.
 

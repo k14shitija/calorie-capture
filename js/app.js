@@ -2,888 +2,528 @@
   const E = window.CC_ENGINE;
   const D = window.CC_DATA;
   const S = window.CC_STORE;
+  const AI = window.CC_AI;
   const root = document.getElementById("app");
   let state = S.load();
-  let toastTimer = null;
-  let draft = {
-    plateId: "9",
-    slot: E.mealSlotForHour(new Date().getHours()),
-    preview: "",
-    analysis: null,
-    items: []
-  };
+  let draft = null;
+  let analyzing = false;
+  let restLeft = 0;
+  let restTimer = null;
+  let onboard = { step: 0, goal: "lose", experience: "beginner", frequency: "4-5", motive: "progress", name: "", persona: "" };
 
-  function esc(value) {
-    return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    }[ch]));
+  function esc(v) {
+    return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
-
-  function go(hash) {
-    location.hash = hash;
-  }
-
+  function go(h) { location.hash = h; }
+  function persist() { S.save(state); }
   function route() {
-    const raw = (location.hash || "#/").replace(/^#/, "");
-    const parts = raw.split("/").filter(Boolean);
+    const parts = (location.hash || "#/").replace(/^#/, "").split("/").filter(Boolean);
     if (!parts.length) return { name: "home" };
-    if (parts[0] === "gym" && parts[1]) return { name: "tutorial", id: parts[1] };
+    if (parts[0] === "workout" && parts[1]) return { name: "exercise", id: parts[1] };
+    if (parts[0] === "equipment" && parts[1]) return { name: "equipment", id: parts[1] };
     return { name: parts[0], id: parts[1] };
   }
-
-  function persist() {
-    S.save(state);
-  }
-
-  function toast(message) {
-    const old = document.querySelector(".toast");
-    if (old) old.remove();
-    const el = document.createElement("div");
-    el.className = "toast";
-    el.textContent = message;
-    document.body.appendChild(el);
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.remove(), 3600);
-  }
-
-  function applyTheme() {
-    document.documentElement.dataset.theme = state.theme || "dark";
-  }
-
   function todayMeals() {
-    const key = E.todayKey();
-    return state.meals.filter((m) => E.todayKey(m.at) === key);
+    return state.meals.filter((m) => E.todayKey(m.at) === E.todayKey());
+  }
+  function eaten() { return todayMeals().reduce((s, m) => s + (m.kcal || 0), 0); }
+  function protein() { return todayMeals().reduce((s, m) => s + (m.protein || 0), 0); }
+  function greeting() {
+    const h = new Date().getHours();
+    return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  }
+  function persona() {
+    return D.PERSONAS.find((p) => p.id === (state.profile && state.profile.persona)) || D.PERSONAS[1];
+  }
+  function peopleById(id) { return D.PEOPLE.find((p) => p.id === id); }
+  function sessionSets() {
+    let done = 0; let total = 0;
+    (state.session.exercises || []).forEach((ex) => (ex.sets || []).forEach((s) => { total += 1; if (s.done) done += 1; }));
+    return { done, total };
+  }
+  function award(kind, label) {
+    const xp = E.xpFor(kind);
+    state.points = (state.points || 0) + xp;
+    state.xpLog.unshift({ at: new Date().toISOString(), kind, xp, label });
+    const day = E.todayKey();
+    if (!state.activityDays.includes(day)) {
+      state.activityDays.push(day);
+      state.streak = E.streakFromDays(state.activityDays);
+    }
+    persist();
+    showXp(label, xp);
+  }
+  function showXp(label, xp) {
+    document.querySelectorAll(".xp").forEach((n) => n.remove());
+    const el = document.createElement("div");
+    el.className = "xp";
+    el.innerHTML = `<b>${esc(label)}</b><div>+${xp} XP</div>`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1800);
   }
 
-  function todayWorkouts() {
-    const key = E.todayKey();
-    return state.workouts.filter((w) => E.todayKey(w.at) === key);
-  }
-
-  function todayTotals() {
-    const inK = todayMeals().reduce((s, m) => s + (m.kcal || 0), 0);
-    const outK = todayWorkouts().reduce((s, w) => s + (w.kcal || 0), 0);
-    return { inK, outK, net: inK - outK };
-  }
-
-  function nav(active) {
+  function shell(active, inner) {
+    const first = (state.profile && state.profile.name || "there").split(" ")[0];
     const items = [
-      ["#/", "home", "⌂", "Today"],
-      ["#/log", "log", "◎", "Snap"],
-      ["#/gym", "gym", "🏋", "Gym"],
-      ["#/plan", "plan", "🗒", "Plan"],
-      ["#/you", "you", "●", "You"]
+      ["#/", "home", "⌂", "Home"],
+      ["#/meals", "meals", "🍽", "Meals"],
+      ["#/workout", "workout", "💪", "Workout"],
+      ["#/friends", "friends", "◎", "Friends"],
+      ["#/profile", "profile", "●", "Profile"]
     ];
-    return `<nav class="nav">${items.map(([href, id, icon, label]) => (
-      `<a href="${href}" class="${id === active ? "active" : ""} ${id === "log" ? "capture" : ""}"><span>${icon}</span>${label}</a>`
-    )).join("")}</nav>`;
+    const desk = items.concat([["#/progress", "progress", "📈", "Progress"]]);
+    return `<aside class="rail">
+      <div class="logo"><i>C</i> Calorie Capture</div>
+      <nav class="desk-nav">${desk.map(([href, id, icon, label]) =>
+        `<a href="${href}" class="${active === id || (active === "exercise" && id === "workout") || (active === "scan" && id === "meals") ? "active" : ""}">${icon} ${label}</a>`
+      ).join("")}</nav>
+      <button class="log-meal" data-act="scan" style="margin-top:16px">+ Log meal</button>
+    </aside>
+    <div class="main">
+      <div class="top">
+        <div class="logo"><i>C</i><div>Calorie Capture<div class="tiny">${esc(persona().name)}</div></div></div>
+        <button class="log-meal" data-act="scan">+ Log meal</button>
+      </div>
+      ${inner}
+    </div>
+    <nav class="nav">${items.map(([href, id, icon, label]) =>
+      `<a href="${href}" class="${active === id || (active === "exercise" && id === "workout") || (active === "scan" && id === "meals") ? "active" : ""}"><span>${icon}</span>${label}</a>`
+    ).join("")}</nav>`;
   }
 
-  function topbar(subtitle) {
-    return `<div class="topbar">
-      <a class="brand" href="#/welcome">
-        <img src="assets/logo.svg" alt="" />
-        <div>CalorieCapture<small>${esc(subtitle)}</small></div>
-      </a>
-      <button class="icon-btn" data-act="theme" aria-label="Toggle theme">${state.theme === "light" ? "☾" : "☼"}</button>
-    </div>`;
-  }
-
-  function ringSvg(pct) {
+  function ring(pct) {
     const p = E.clamp(pct, 0, 1);
-    const r = 58;
-    const c = 2 * Math.PI * r;
-    const dash = (c * p).toFixed(1);
-    return `<svg width="140" height="140" viewBox="0 0 140 140" aria-hidden="true">
-      <circle cx="70" cy="70" r="${r}" fill="none" stroke="rgba(226,90,56,0.16)" stroke-width="12"/>
-      <circle cx="70" cy="70" r="${r}" fill="none" stroke="#e25a38" stroke-width="12" stroke-linecap="round" stroke-dasharray="${dash} ${c}"/>
+    const c = 2 * Math.PI * 54;
+    return `<svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
+      <circle cx="66" cy="66" r="54" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="12"/>
+      <circle cx="66" cy="66" r="54" fill="none" stroke="#FF5A5F" stroke-width="12" stroke-linecap="round"
+        stroke-dasharray="${(c * p).toFixed(1)} ${c}" style="animation:ringin .7s ease"/>
     </svg>`;
   }
 
-  function renderWelcome() {
-    root.className = "app site";
-    root.innerHTML = `<header class="site-bar">
-        <div class="brand"><img src="assets/logo.svg" alt="" /><div>CalorieCapture<small>for busy beginners</small></div></div>
-        <button class="icon-btn" data-act="theme" aria-label="Toggle theme">${state.theme === "light" ? "☾" : "☼"}</button>
-      </header>
-      <section class="site-hero">
-        <div>
-          <p class="eyebrow">Snap. Learn. Stay consistent.</p>
-          <h1>The plate is the log. The machine has a guide.</h1>
-          <p class="lede">Photograph dinner, set the plate size, and get an on-device calorie read. At the gym, search or scan a machine and follow a one-minute tutorial — no trainer required.</p>
-        </div>
-        <div class="phone-wrap" aria-hidden="true">
-          <div class="phone">
-            <div class="phone-notch"></div>
-            <div class="phone-body">
-              <p class="tiny">Today</p>
-              <div class="phone-ring">1,240</div>
-              <div class="phone-pills"><i></i><i></i><i></i></div>
-            </div>
-          </div>
-        </div>
-      </section>
-      <div class="story-row">
-        <article class="story s1"><b>One photo</b>Plate size makes the portion honest. Edit if a side was missed.</article>
-        <article class="story s2"><b>Gym confidence</b>Search or scan a machine. Get steps, mistakes, and calories out.</article>
-        <article class="story s3"><b>In vs out</b>A home screen that shows meals, movement, water, and streak.</article>
-        <article class="story s4"><b>A plan for today</b>Pick a goal and a time. Get a beginner routine in one tap.</article>
+  function renderOnboard() {
+    const steps = [
+      { title: "What is your main goal?", key: "goal", opts: D.GOALS.map((g) => [g.id, g.label]) },
+      { title: "What's your experience?", key: "experience", opts: [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]] },
+      { title: "How often do you want to work out?", key: "frequency", opts: [["2-3", "2–3 days"], ["4-5", "4–5 days"], ["6+", "6+ days"]] },
+      { title: "What motivates you?", key: "motive", opts: [["progress", "Seeing progress"], ["competition", "Competition"], ["streaks", "Streaks"], ["goals", "Personal goals"], ["rewards", "Rewards"]] },
+      { title: "Choose your persona", key: "persona", opts: D.PERSONAS.map((p) => [p.id, `${p.emoji} ${p.name}`]) }
+    ];
+    const s = steps[onboard.step] || steps[0];
+    if (onboard.step === 4 && !onboard.persona) onboard.persona = E.pickPersona(onboard);
+    root.innerHTML = `<div class="ob">
+      <p class="tiny">Step ${onboard.step + 1} of 5</p>
+      <h1>${esc(s.title)}</h1>
+      ${onboard.step === 0 ? `<label class="field"><span>Your name</span><input id="ob-name" value="${esc(onboard.name)}" placeholder="Kshitija" /></label>` : ""}
+      <div class="btn-row">${s.opts.map(([id, label]) =>
+        `<button class="chip ${onboard[s.key] === id ? "on" : ""}" data-act="ob-opt" data-key="${s.key}" data-id="${id}">${esc(label)}</button>`
+      ).join("")}</div>
+      ${onboard.step === 4 ? `<p class="muted" style="margin:12px 0">${esc((D.PERSONAS.find((p) => p.id === onboard.persona) || {}).line || "")}</p>` : ""}
+      <div class="btn-row" style="margin-top:18px">
+        ${onboard.step ? `<button class="btn" data-act="ob-back">Back</button>` : ""}
+        <button class="btn btn-primary" data-act="ob-next">${onboard.step === 4 ? "Build my home" : "Continue"}</button>
       </div>
-      <section class="card" style="margin-top:8px">
-        <h2>How a day feels</h2>
-        <div class="how">
-          <div class="how-item"><em>1</em><div><b>Before the gym</b><div class="muted">Open a short machine guide so the first set is setup, not guessing.</div></div></div>
-          <div class="how-item"><em>2</em><div><b>At the rack</b><div class="muted">Scan or search the machine. Mark the tutorial watched. Log the minutes.</div></div></div>
-          <div class="how-item"><em>3</em><div><b>Home, takeout in hand</b><div class="muted">Snap the plate. Get calories in. See them next to calories out.</div></div></div>
-          <div class="how-item"><em>4</em><div><b>A quiet nudge</b><div class="muted">Reminders for lunch, water, and a ten-minute walk — not a pile of ads.</div></div></div>
-        </div>
-      </section>
-      <section class="card quote-card">
-        <p>“This is awesome — it helps me record how much I take in with one picture.”</p>
-        <div class="tiny" style="margin-top:10px">What first-time users asked for next: plate size, a cleaner home, and a friend challenge. Those are in the app.</div>
-      </section>
-      <div class="site-cta">
-        <button class="btn btn-primary" data-act="start">${state.profile ? "Back to today" : "Start free"}</button>
-        <button class="btn" data-act="${state.profile ? "goto-today" : "demo"}">${state.profile ? "Open dashboard" : "Try a sample day"}</button>
-      </div>`;
+      <button class="btn btn-wide" data-act="demo" style="margin-top:10px">Show stakeholder demo</button>
+    </div>`;
   }
 
-  function renderOnboarding() {
-    const p = state.draftProfile || { name: "", age: 34, sex: "male", goal: "lose", activity: "sedentary", weight: 190, weightUnit: "lb", height: 70, heightUnit: "in" };
-    root.innerHTML = `${topbar("60-second setup")}
-      <div class="card">
-        <h2>What should we call you?</h2>
-        <label class="field"><span>Name</span><input id="ob-name" value="${esc(p.name)}" autocomplete="name" /></label>
-        <div class="grid two">
-          <label class="field"><span>Age</span><input id="ob-age" type="number" inputmode="numeric" value="${esc(p.age)}" /></label>
-          <label class="field"><span>Sex used for calorie math</span>
-            <select id="ob-sex"><option value="male" ${p.sex === "male" ? "selected" : ""}>Male</option><option value="female" ${p.sex === "female" ? "selected" : ""}>Female</option></select>
-          </label>
-        </div>
-        <div class="grid two">
-          <label class="field"><span>Weight</span><input id="ob-weight" type="number" inputmode="decimal" value="${esc(p.weight)}" /></label>
-          <label class="field"><span>Unit</span><select id="ob-wu"><option value="lb" ${p.weightUnit === "lb" ? "selected" : ""}>lb</option><option value="kg" ${p.weightUnit === "kg" ? "selected" : ""}>kg</option></select></label>
-        </div>
-        <div class="grid two">
-          <label class="field"><span>Height</span><input id="ob-height" type="number" inputmode="decimal" value="${esc(p.height)}" /></label>
-          <label class="field"><span>Unit</span><select id="ob-hu"><option value="in" ${p.heightUnit === "in" ? "selected" : ""}>in</option><option value="cm" ${p.heightUnit === "cm" ? "selected" : ""}>cm</option></select></label>
-        </div>
-        <p class="tiny">Goal</p>
-        <div class="chips" id="ob-goal">
-          ${[["lose", "Lose fat"], ["maintain", "Stay steady"], ["gain", "Build"], ["confidence", "Gym confidence"]].map(([id, label]) =>
-            `<button class="chip ${p.goal === id ? "active" : ""}" data-act="goal" data-id="${id}">${label}</button>`).join("")}
-        </div>
-        <p class="tiny" style="margin-top:12px">Typical week</p>
-        <div class="chips">
-          ${[["sedentary", "Desk-heavy"], ["light", "1–2 walks"], ["moderate", "3 gym days"], ["active", "Most days"]].map(([id, label]) =>
-            `<button class="chip ${p.activity === id ? "active" : ""}" data-act="activity" data-id="${id}">${label}</button>`).join("")}
-        </div>
-        <div class="btn-row" style="margin-top:16px">
-          <button class="btn btn-primary btn-wide" data-act="finish-onboard">Build my dashboard</button>
-        </div>
-      </div>`;
-  }
-
-  function collectOnboard() {
-    return {
-      name: document.getElementById("ob-name").value.trim() || "Friend",
-      age: Number(document.getElementById("ob-age").value) || 34,
-      sex: document.getElementById("ob-sex").value,
-      weight: Number(document.getElementById("ob-weight").value) || 190,
-      weightUnit: document.getElementById("ob-wu").value,
-      height: Number(document.getElementById("ob-height").value) || 70,
-      heightUnit: document.getElementById("ob-hu").value,
-      goal: (state.draftProfile && state.draftProfile.goal) || "lose",
-      activity: (state.draftProfile && state.draftProfile.activity) || "sedentary"
+  function finishOnboard() {
+    const name = (document.getElementById("ob-name") && document.getElementById("ob-name").value.trim()) || onboard.name || "Friend";
+    const personaId = onboard.persona || E.pickPersona(onboard);
+    state.profile = {
+      name, username: name.toLowerCase().replace(/\s+/g, ""), persona: personaId,
+      goal: onboard.goal, experience: onboard.experience, frequency: onboard.frequency, motive: onboard.motive,
+      age: 25, sex: "female", weight: 132, weightUnit: "lb", height: 64, heightUnit: "in", activity: "light"
     };
-  }
-
-  function finishOnboard(profile) {
-    state.profile = profile;
-    state.targets = E.estimateTargets(profile);
-    state.seenWelcome = true;
+    state.targets = Object.assign(E.estimateTargets(state.profile), { sleep: "—" });
+    if (state.targets.calories === 1850 || onboard.goal === "lose") state.targets.calories = Math.min(state.targets.calories, 1850);
+    state.onboarded = true;
     persist();
-    toast(`Daily target set to ${state.targets.calories} kcal. You can change this anytime.`);
     go("#/");
   }
 
-  function startDemo() {
-    finishOnboard({
-      name: "John",
-      age: 34,
-      sex: "male",
-      weight: 190,
-      weightUnit: "lb",
-      height: 70,
-      heightUnit: "in",
-      goal: "lose",
-      activity: "sedentary",
-      demo: true
-    });
-  }
-
-  function hourGreeting() {
-    const h = new Date().getHours();
-    if (h < 11) return "Good morning";
-    if (h < 17) return "Good afternoon";
-    return "Good evening";
-  }
-
-  function suggestions() {
-    const names = state.meals.slice(0, 16).flatMap((m) => (m.items || []).map((i) => i.name));
-    const lastGym = state.tutorials[state.tutorials.length - 1];
-    const food = names[0] || "a plate photo";
-    const machine = lastGym ? D.EQUIPMENT.find((e) => e.id === lastGym) : D.EQUIPMENT.find((e) => e.id === "treadmill");
-    return [
-      { href: "#/log", title: `Log ${food} again`, detail: "Your recent meals train the next estimate." },
-      { href: `#/gym/${machine ? machine.id : "treadmill"}`, title: machine ? `Repeat ${machine.name}` : "Open a gym guide", detail: "A two-minute reread beats guessing the seat height." },
-      { href: "#/plan", title: "Generate tonight’s routine", detail: "20 minutes. Beginner mix. Calories out included." }
-    ];
-  }
-
   function renderHome() {
-    const t = state.targets || E.estimateTargets(state.profile || {});
-    const { inK, outK } = todayTotals();
-    const remaining = t.calories - inK + outK;
-    const pct = t.calories ? inK / t.calories : 0;
-    const days = E.uniqueDays(state.meals.map((m) => m.at).concat(state.workouts.map((w) => w.at)));
-    const streak = E.streakFromDays(days);
-    const badges = E.earnedBadges(badgeState());
-    const water = S.waterFor(state, E.todayKey());
-    const week = E.weekSeries(state.meals);
-    const quote = D.QUOTES[new Date().getDate() % D.QUOTES.length];
-    const meals = todayMeals();
-    const workouts = todayWorkouts();
-    const recs = suggestions();
-    root.innerHTML = `${topbar("Today")}
-      ${nav("home")}
-      <div class="main grid">
-        <section class="hello">
-          <h1>${hourGreeting()}, ${esc((state.profile.name || "there").split(" ")[0])}.</h1>
-          <p>${esc(quote)}</p>
-        </section>
-        <section class="card hero-card">
-          <div class="row"><h2>In vs out</h2><span class="chip">${streak} day streak</span></div>
-          <div class="rings">
-            <div class="ring-wrap">${ringSvg(pct)}<div class="ring-center"><strong>${remaining}</strong><div class="tiny">kcal left</div></div></div>
-            <div class="stat-col">
-              <div><div class="stat"><span>Eaten</span><b>${inK}</b></div><div class="bar in"><span style="width:${E.clamp(inK / t.calories * 100, 0, 100)}%"></span></div></div>
-              <div><div class="stat"><span>Burned</span><b>${outK}</b></div><div class="bar out"><span style="width:${E.clamp(outK / 600 * 100, 0, 100)}%"></span></div></div>
-              <div><div class="stat"><span>Daily target</span><b>${t.calories}</b></div></div>
-            </div>
+    const t = state.targets;
+    const inK = eaten();
+    const remain = Math.max(0, t.calories - inK);
+    const insight = E.insightCopy(state);
+    const p = persona();
+    const sets = sessionSets();
+    const cards = state.dashCards || ["goal", "score", "plan", "meals", "circle"];
+    const first = state.profile.name.split(" ")[0];
+    const within = inK > 0 && inK <= t.calories;
+    let html = `<section class="hello"><h1>${greeting()}, ${esc(first)}.</h1><p>${esc(p.emoji)} ${esc(p.line)}</p></section><div class="grid two">`;
+    if (cards.includes("goal")) {
+      html += `<section class="card goal-card">
+        <p class="tiny">Your goal today</p>
+        <h2 style="font-size:1.6rem">${inK.toLocaleString()} / ${t.calories.toLocaleString()} kcal</h2>
+        <div class="rings">
+          <div class="ring">${ring(inK / t.calories)}<div class="ring-c"><strong>${remain}</strong><span class="tiny">remaining</span></div></div>
+          <div>
+            <div class="stat"><span>Consumed</span><b>${inK}</b></div>
+            <div class="bar"><i style="width:${E.clamp(inK / t.calories * 100, 0, 100)}%"></i></div>
+            <div class="stat"><span>Protein</span><b>${protein()} / ${t.protein}g</b></div>
+            <p class="insight">${esc(insight.lines[0])}</p>
           </div>
-        </section>
-        <section class="card">
-          <div class="row"><h2>For you</h2><a href="#/welcome">See the homepage</a></div>
-          <div class="reco" style="margin-top:8px">${recs.map((r) =>
-            `<a class="reco-item" href="${r.href}"><b>${esc(r.title)}</b><div class="tiny">${esc(r.detail)}</div></a>`
-          ).join("")}</div>
-        </section>
-        <section class="card">
-          <div class="row"><h2>This week</h2><a href="#/history">History</a></div>
-          <div class="week">${week.map((d) => {
-            const h = Math.max(6, Math.round((d.kcal / Math.max(1, t.calories)) * 72));
-            return `<div class="col"><b style="height:${h}px"></b><span>${esc(d.label)}</span></div>`;
-          }).join("")}</div>
-        </section>
-        <section class="card">
-          <div class="row"><h2>Water</h2><span class="tiny">${water}/${t.water}</span></div>
-          <div class="water-row">${Array.from({ length: t.water }, (_, i) =>
-            `<button class="drop ${i < water ? "on" : ""}" data-act="water" data-n="${i + 1}">💧</button>`).join("")}</div>
-        </section>
-        <section class="card">
-          <div class="row"><h2>Plates today</h2><a href="#/log">Snap</a></div>
-          ${meals.length ? `<div class="list">${meals.map((m) =>
-            `<div class="list-item"><div>${m.thumb ? `<img src="${m.thumb}" alt="" style="width:44px;height:44px;border-radius:12px;object-fit:cover">` : "🍽️"}</div><div><b>${esc(m.slot)}</b><div class="tiny">${esc((m.items || []).map((i) => i.name).join(", "))}</div></div><b>${m.kcal}</b></div>`
-          ).join("")}</div>` : `<p class="muted">Nothing yet. Photograph a plate — size is what makes the portion smart.</p>`}
-        </section>
-        <section class="card">
-          <div class="row"><h2>Movement today</h2><a href="#/gym">Gym</a></div>
-          ${workouts.length ? `<div class="list">${workouts.map((w) =>
-            `<div class="list-item"><div>🏋️</div><div><b>${esc(w.name)}</b><div class="tiny">${w.minutes} min</div></div><b>${w.kcal}</b></div>`
-          ).join("")}</div>` : `<p class="muted">No session yet. Scan a machine or generate a 20-minute plan.</p>`}
-        </section>
-        <section class="card">
-          <div class="row"><h2>Marks</h2><span class="tiny">${badges.length}/${D.BADGES.length}</span></div>
-          <div class="badges">${D.BADGES.map((b) => {
-            const on = badges.some((x) => x.id === b.id);
-            return `<div class="badge ${on ? "" : "off"}">${b.icon} <b>${esc(b.name)}</b><div class="tiny">${esc(b.detail)}</div></div>`;
-          }).join("")}</div>
-        </section>
-      </div>`;
+        </div>
+      </section>`;
+    }
+    if (cards.includes("score")) {
+      html += `<section class="card"><h2>Today's score</h2>
+        <div class="score"><div><b>${state.points}</b><span class="tiny">points</span></div>
+        <div><span class="pill">🔥 ${state.streak} day streak</span><p class="tiny" style="margin-top:8px">You're on a roll.</p></div></div>
+        <p class="muted" style="margin-top:10px">${esc(insight.lines[1])}</p></section>`;
+    }
+    html += `</div><div class="grid" style="margin-top:12px">`;
+    if (cards.includes("plan")) {
+      html += `<section class="card"><h2>Today's plan</h2><div class="plan">
+        <a href="#/workout"><div><div class="tiny">Workout</div><b>${esc(state.session.name)}</b></div><span class="tiny">${sets.done}/${sets.total} sets</span></a>
+        <a href="#/scan"><div><div class="tiny">Nutrition</div><b>${remain} kcal remaining</b></div><span class="tiny">${within ? "In range" : "Log the next plate"}</span></a>
+        <div class="row-card"><div><div class="tiny">Recovery</div><b>${esc(t.sleep || "—")}</b></div><span class="tiny">Sleep last night</span></div>
+      </div><p class="muted" style="margin-top:10px">${esc(insight.lines[2])}</p></section>`;
+    }
+    if (cards.includes("meals")) {
+      const meals = todayMeals();
+      html += `<section class="card"><div class="row"><h2>Today's plates</h2><button class="chip" data-act="scan">Scan meal</button></div>
+        ${meals.length ? meals.map(mealRow).join("") : empty("Your food journey starts here.", "Snap your first meal and let AI do the logging.", "scan")}</section>`;
+    }
+    if (cards.includes("circle")) {
+      html += `<section class="card"><div class="row"><h2>Your circle</h2><a class="tiny" href="#/friends">See all</a></div>${circleList()}</section>`;
+    }
+    html += `</div>`;
+    root.innerHTML = shell("home", html);
   }
 
-  function badgeState() {
-    return {
-      meals: state.meals,
-      workouts: state.workouts,
-      tutorials: state.tutorials,
-      waterBest: state.waterBest || 0,
-      targets: state.targets,
-      completedRoutine: state.completedRoutine,
-      joinedChallenges: state.joinedChallenges
-    };
+  function mealRow(m) {
+    const img = m.image ? `<img src="${esc(m.image)}" alt="">` : `<div class="ph"></div>`;
+    return `<div class="meal" style="margin-top:8px">${img}<div><b>${esc(m.title || m.slot)}</b><div class="tiny">${esc(m.slot)} · ${esc((m.items || []).map((i) => i.name).join(", ") || "Logged meal")}</div></div><b>${m.kcal}</b></div>`;
+  }
+  function empty(title, body, act) {
+    return `<div class="empty"><h2>${esc(title)}</h2><p class="muted">${esc(body)}</p>${act ? `<button class="btn btn-primary" style="margin-top:12px" data-act="${act}">Start</button>` : ""}</div>`;
+  }
+  function circleList() {
+    const mine = state.friends.map(peopleById).filter(Boolean);
+    if (!mine.length) return empty("Build your fitness circle.", "Add friends and keep each other accountable.", "goto-friends");
+    return mine.map((p) => `<div class="friend"><div class="av">${esc(p.name[0])}</div><div><b>${esc(p.name)}</b><div class="tiny">${p.streak} day streak · ${p.workoutsWeek} workouts</div></div><b>${p.points}</b></div>`).join("");
   }
 
-  function renderLog() {
-    const items = draft.items;
-    const totals = E.sumMacros(items);
-    root.innerHTML = `${topbar("Capture a meal")}
-      ${nav("log")}
-      <div class="main grid">
-        <section class="card">
-          <h2>Photo + plate size</h2>
-          <div class="photo-box">
-            ${draft.preview ? `<img src="${draft.preview}" alt="Meal preview">` : `<div><div class="badge-dot" style="margin:0 auto 8px">📷</div><b>Tap to take or upload a photo</b><div class="tiny">On-device estimate. Nothing leaves this phone.</div></div>`}
-            <input id="meal-photo" type="file" accept="image/*" capture="environment" />
-          </div>
-          <p class="tiny" style="margin:12px 0 8px">Plate size</p>
-          <div class="chips">${D.PLATE_SIZES.map((p) =>
-            `<button class="chip ${draft.plateId === p.id ? "active" : ""}" data-act="plate" data-id="${p.id}">${esc(p.label)}</button>`).join("")}</div>
-          <p class="tiny" style="margin:12px 0 8px">Meal</p>
-          <div class="chips">${D.MEAL_SLOTS.map((s) =>
-            `<button class="chip ${draft.slot === s.id ? "active" : ""}" data-act="slot" data-id="${s.id}">${esc(s.label)}</button>`).join("")}</div>
-        </section>
-        <section class="card">
-          <div class="row"><h2>Estimate</h2>${draft.analysis ? `<span class="conf">${Math.round(draft.analysis.confidence * 100)}% confidence</span>` : ""}</div>
-          ${draft.analysis ? `<p class="tiny">${esc(draft.analysis.note)}</p>` : `<p class="muted">Add a photo to draft foods from color, time of day, and plate size. You can search and edit every item.</p>`}
-          <div class="list" style="margin-top:10px">${items.map((item, idx) =>
-            `<div class="list-item"><div>🥗</div><div><b>${esc(item.name)}</b><div class="tiny">${esc(item.serving)} · x${item.portion}</div></div><div><b>${item.kcal}</b><button class="mini" data-act="rm-item" data-i="${idx}">remove</button></div></div>`
-          ).join("")}</div>
-          <label class="field" style="margin-top:12px"><span>Add a food</span><input id="food-q" class="search" placeholder="chicken, rice, latte..." /></label>
-          <div id="food-hits" class="chips"></div>
-          <div class="row" style="margin-top:8px"><span>Total</span><b>${totals.kcal} kcal · P ${totals.protein} C ${totals.carbs} F ${totals.fat}</b></div>
-          <button class="btn btn-primary btn-wide" data-act="save-meal" ${items.length ? "" : "disabled"} style="margin-top:12px">Save to today</button>
-        </section>
-      </div>`;
-    const q = document.getElementById("food-q");
-    if (q) q.addEventListener("input", onFoodQuery);
-    const photo = document.getElementById("meal-photo");
-    if (photo) photo.addEventListener("change", onPhoto);
+  function renderMeals() {
+    const groups = {};
+    state.meals.forEach((m) => {
+      const k = E.todayKey(m.at) === E.todayKey() ? "TODAY" : E.todayKey(m.at);
+      groups[k] = groups[k] || [];
+      groups[k].push(m);
+    });
+    const keys = Object.keys(groups);
+    root.innerHTML = shell("meals", `<section class="card scan" data-act="scan"><div><p class="tiny">AI meal camera</p><b>📸 Scan your meal</b><p class="tiny">Camera or photo library. Estimates only.</p></div></section>
+      <div class="grid" style="margin-top:12px">${keys.length ? keys.map((k) =>
+        `<section class="card"><h2>${esc(k)}</h2>${groups[k].map(mealRow).join("")}</section>`
+      ).join("") : `<section class="card">${empty("Your food journey starts here.", "Snap your first meal and let AI do the logging.", "scan")}</section>`}</div>`);
   }
 
-  function onFoodQuery(ev) {
-    const hits = E.findFoods(ev.target.value).slice(0, 8);
-    document.getElementById("food-hits").innerHTML = hits.map((f) =>
-      `<button class="chip" data-act="add-food" data-id="${f.id}">${esc(f.name)} · ${f.kcal}</button>`
-    ).join("");
-  }
-
-  function shrinkImage(file) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const max = 420;
-        const scale = Math.min(1, max / Math.max(img.width, img.height));
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-        URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL("image/jpeg", 0.62));
-      };
-      img.onerror = reject;
-      img.src = url;
+  function renderScan() {
+    const t = draft && draft.totals;
+    root.innerHTML = shell("scan", `<section class="card">
+      <h2>Scan your meal</h2>
+      <div class="scan" style="margin-top:10px">
+        ${draft && draft.image ? `<img src="${draft.image}" alt="Meal">` : `<div><b>Take or upload a photo</b><p class="tiny">Nothing leaves this device.</p></div>`}
+        <input id="meal-file" type="file" accept="image/*" capture="environment">
+      </div>
+      ${analyzing ? `<div class="analyzing"><div class="orb"></div><b>Analyzing your meal…</b></div>` : ""}
+      ${draft && !analyzing ? `<div style="margin-top:14px">
+        <p class="tiny">Estimated plate</p>
+        <h2>${esc(draft.title)}</h2>
+        <p><b>${t.kcal} kcal</b> · Confidence: ${esc(draft.confidence)}</p>
+        <p class="tiny">${esc(draft.note)}</p>
+        ${(draft.items || []).map((item, i) => `<div class="row" style="margin-top:10px">
+          <div><b>${esc(item.name)}</b><div class="tiny">~${item.grams}g · ${item.kcal} kcal</div></div>
+          <select data-act="grams" data-i="${i}">${[100, 150, 200, 250].map((g) =>
+            `<option value="${g}" ${Number(item.grams) === g ? "selected" : ""}>${g}g</option>`
+          ).join("")}<option value="custom">Custom</option></select>
+        </div>`).join("")}
+        <p style="margin-top:12px">Macros · P ${t.protein}g · C ${t.carbs}g · F ${t.fat}g</p>
+        <button class="btn btn-primary btn-wide" data-act="save-meal" style="margin-top:12px">Save estimated meal · +${D.XP.meal} XP</button>
+      </div>` : `<p class="muted" style="margin-top:12px">Choose camera or a file. Then edit portions before you save.</p>`}
+    </section>`);
+    const file = document.getElementById("meal-file");
+    if (file) file.addEventListener("change", onMealFile);
+    root.querySelectorAll("select[data-act='grams']").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        const i = Number(sel.dataset.i);
+        const food = D.FOODS.find((f) => f.id === draft.items[i].id);
+        let g = sel.value;
+        if (g === "custom") g = window.prompt("Grams?", draft.items[i].grams) || draft.items[i].grams;
+        draft.items[i] = Object.assign(E.scaleByGrams(food, Number(g)), { approx: true });
+        draft.totals = E.sumMacros(draft.items);
+        render();
+      });
     });
   }
 
-  function sharesFromFile(file) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = 80;
-        canvas.height = 80;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, 80, 80);
-        const pixels = ctx.getImageData(0, 0, 80, 80).data;
-        URL.revokeObjectURL(url);
-        resolve(E.classifyPixels(pixels));
-      };
-      img.onerror = reject;
-      img.src = url;
-    });
-  }
-
-  async function onPhoto(ev) {
+  async function onMealFile(ev) {
     const file = ev.target.files && ev.target.files[0];
     if (!file) return;
+    analyzing = true;
+    render();
     try {
-      draft.preview = await shrinkImage(file);
-      const classified = await sharesFromFile(file);
-      const historyNames = state.meals.slice(0, 12).flatMap((m) => (m.items || []).map((i) => i.name));
-      draft.analysis = E.analyzeMeal({
-        shares: classified.shares,
-        plateId: draft.plateId,
-        hour: new Date().getHours(),
-        historyNames
-      });
-      draft.items = draft.analysis.items.map((item) => Object.assign({}, item));
-      render();
-      toast("Estimate ready. Check the foods, then save.");
+      draft = await AI.analyzeMeal(file, { historyNames: state.meals.flatMap((m) => (m.items || []).map((i) => i.name)) });
     } catch (err) {
-      toast("Could not read that photo. Try another image.");
+      draft = null;
+      showXp("Could not read that photo", 0);
     }
+    analyzing = false;
+    render();
   }
 
   function saveMeal() {
-    if (!draft.items.length) return;
+    if (!draft) return;
     const totals = E.sumMacros(draft.items);
-    const meal = {
+    state.meals.unshift({
       id: `meal-${Date.now()}`,
       at: new Date().toISOString(),
-      slot: draft.slot,
-      plateId: draft.plateId,
+      slot: E.mealSlotForHour(new Date().getHours()),
+      title: draft.title,
+      image: draft.image,
       items: draft.items,
       kcal: totals.kcal,
       protein: totals.protein,
       carbs: totals.carbs,
-      fat: totals.fat,
-      thumb: draft.preview,
-      confidence: draft.analysis ? draft.analysis.confidence : null
-    };
-    S.addMeal(state, meal);
-    const first = state.meals.length === 1;
-    draft = { plateId: "9", slot: E.mealSlotForHour(new Date().getHours()), preview: "", analysis: null, items: [] };
-    toast("Meal saved. Nice — consistency beats perfect tracking.");
-    go("#/");
-    if (first) setTimeout(() => showSurvey("meal"), 700);
-  }
-
-  function showSurvey(screen) {
-    if (state.csat.some((c) => c.screen === screen)) return;
-    const el = document.createElement("div");
-    el.className = "toast survey";
-    el.innerHTML = `<b>How was this screen?</b><div class="tiny">One tap. We close the loop on feedback.</div>
-      <div class="btn-row">${[1, 2, 3, 4, 5].map((n) => `<button class="chip" data-score="${n}">${n}</button>`).join("")}</div>`;
-    document.body.appendChild(el);
-    el.addEventListener("click", (ev) => {
-      const btn = ev.target.closest("[data-score]");
-      if (!btn) return;
-      state.csat.push({ screen, score: Number(btn.dataset.score), at: new Date().toISOString() });
-      persist();
-      el.remove();
-      toast("Thanks — we logged it. Your notes shape the next pass.");
+      fat: totals.fat
     });
+    award("meal", "Meal logged");
+    if (eaten() <= state.targets.calories) award("withinTarget", "Within target");
+    draft = null;
+    go("#/meals");
   }
 
-  function eqTone(eq) {
-    if (/treadmill|bike|elliptical|rower|stair/.test(eq.id)) return "cardio";
-    if (/lat|row|pull|face/.test(eq.id)) return "pull";
-    if (/plank/.test(eq.id)) return "core";
-    return "strength";
+  function renderWorkout() {
+    const s = state.session;
+    const sets = sessionSets();
+    root.innerHTML = shell("workout", `<section class="card goal-card">
+      <p class="tiny">Today's workout</p>
+      <h2 style="font-size:1.7rem">${esc(s.name)}</h2>
+      <p>${s.minutes} min · ${s.exercises.length} exercises · ${sets.done}/${sets.total} sets</p>
+      <p class="insight">${esc(E.insightCopy(state).lines[2])}</p>
+    </section>
+    <div class="grid" style="margin-top:12px">${s.exercises.map((ex) => {
+      const done = ex.sets.filter((x) => x.done).length;
+      return `<a class="ex" href="#/workout/${ex.id}"><div class="row"><b>${esc(ex.name)}</b><span class="tiny">${done}/${ex.sets.length}</span></div>
+        <p class="tiny">${esc(ex.muscles.join(" · "))} · ${ex.sets.length} sets × ${ex.sets[0].reps} ${ex.unit || "reps"}</p></a>`;
+    }).join("")}</div>
+    ${sets.done === 0 ? `<section class="card" style="margin-top:12px">${empty("Ready to move?", "Start today's workout and earn your first XP.", "")}</section>` : ""}`);
   }
 
-  function suggestEquipment(shares) {
-    const dark = (shares.dark || 0) + (shares.brown || 0);
-    if (dark > 0.35) return ["leg-press", "chest-press", "lat-pulldown"];
-    if ((shares.white || 0) > 0.28) return ["treadmill", "bike", "elliptical"];
-    return ["treadmill", "goblet-squat", "plank"];
+  function renderExercise(id) {
+    const ex = state.session.exercises.find((e) => e.id === id);
+    if (!ex) return renderWorkout();
+    const eq = D.EQUIPMENT.find((e) => e.id === ex.equipmentId);
+    root.innerHTML = shell("exercise", `<section class="card">
+      <p class="tiny">${esc(ex.muscles.join(" · "))}</p>
+      <h2 style="font-size:1.6rem">${esc(ex.name)}</h2>
+      <p class="muted">${ex.sets.length} sets · rest ${ex.rest}s</p>
+      ${restLeft ? `<p class="rest">Rest ${restLeft}s</p>` : ""}
+      ${ex.sets.map((set, i) => `<div class="set"><div><b>Set ${i + 1}</b><div class="tiny">${set.reps} ${ex.unit || "reps"}${set.weight ? ` · ${set.weight}` : ""}</div></div>
+        <button class="btn ${set.done ? "btn-mint" : "btn-primary"}" data-act="set" data-ex="${ex.id}" data-i="${i}">${set.done ? "Done" : "Complete set"}</button></div>`).join("")}
+      <a class="btn btn-wide" href="#/equipment/${ex.equipmentId}" style="margin-top:12px;display:block;text-align:center">How to use this machine</a>
+    </section>`);
   }
 
-  function renderGym(query, scanHits) {
-    const list = E.findEquipment(query || "");
-    root.innerHTML = `${topbar("Gym floor")}
-      ${nav("gym")}
-      <div class="main grid">
-        <section class="card">
-          <h2>Scan a machine</h2>
-          <p class="muted">Photograph the unit. We suggest two or three beginner guides — you pick the match.</p>
-          <div class="photo-box" style="min-height:140px;margin-top:10px">
-            <div><b>Tap to scan</b><div class="tiny">Stays on this phone.</div></div>
-            <input id="eq-photo" type="file" accept="image/*" capture="environment" />
-          </div>
-          ${scanHits && scanHits.length ? `<div class="eq-grid" style="margin-top:12px">${scanHits.map((eq) =>
-            `<a class="eq-card ${eqTone(eq)}" href="#/gym/${eq.id}"><b>${esc(eq.name)}</b><span>${esc(eq.difficulty)} · ${eq.kcalPerMin} kcal/min</span></a>`
-          ).join("")}</div>` : ""}
-        </section>
-        <input class="search" id="gym-q" placeholder="Treadmill, lat pulldown, beginner..." value="${esc(query || "")}" />
-        <div class="eq-grid">${list.map((eq) =>
-          `<a class="eq-card ${eqTone(eq)}" href="#/gym/${eq.id}"><b>${esc(eq.name)}</b><span>${esc(eq.muscles[0])} · ${esc(eq.difficulty)}</span></a>`
-        ).join("")}</div>
-      </div>`;
-    const input = document.getElementById("gym-q");
-    if (input) input.addEventListener("input", (ev) => renderGym(ev.target.value, scanHits));
-    const photo = document.getElementById("eq-photo");
-    if (photo) photo.addEventListener("change", async (ev) => {
-      const file = ev.target.files && ev.target.files[0];
-      if (!file) return;
-      try {
-        const classified = await sharesFromFile(file);
-        const ids = suggestEquipment(classified.shares);
-        const hits = ids.map((id) => D.EQUIPMENT.find((e) => e.id === id)).filter(Boolean);
-        renderGym(query, hits);
-        toast("Here are likely matches. Open the one you are standing at.");
-      } catch (err) {
-        toast("Could not read that photo.");
-      }
-    });
+  function completeSet(exId, i) {
+    const ex = state.session.exercises.find((e) => e.id === exId);
+    if (!ex || ex.sets[i].done) return;
+    ex.sets[i].done = true;
+    award("set", "SET COMPLETE");
+    if (ex.sets.every((s) => s.done)) award("exercise", "Exercise done");
+    const all = state.session.exercises.every((e) => e.sets.every((s) => s.done));
+    if (all && !state.session.done) {
+      state.session.done = true;
+      award("workout", "Workout complete");
+      state.workouts.unshift({ id: `w-${Date.now()}`, at: new Date().toISOString(), name: state.session.name, kcal: 240 });
+    }
+    persist();
+    restLeft = ex.rest;
+    clearInterval(restTimer);
+    restTimer = setInterval(() => {
+      restLeft -= 1;
+      if (restLeft <= 0) { clearInterval(restTimer); restLeft = 0; }
+      if (route().name === "exercise") render();
+    }, 1000);
+    render();
   }
 
-  function renderTutorial(id) {
+  function renderEquipment(id) {
     const eq = D.EQUIPMENT.find((e) => e.id === id);
-    if (!eq) return renderGym();
-    root.innerHTML = `${topbar(eq.name)}
-      ${nav("gym")}
-      <div class="main grid">
-        <section class="card">
-          <div class="row"><h2>${esc(eq.name)}</h2><span class="chip">${esc(eq.difficulty)}</span></div>
-          <p class="muted">${esc(eq.summary)}</p>
-          <p class="tiny" style="margin-top:8px">${esc(eq.muscles.join(" · "))} · about ${eq.kcalPerMin} kcal / min</p>
-        </section>
-        <section class="card">
-          <h2>Do this</h2>
-          <div class="steps">${eq.steps.map((s) => `<div class="step"><div>${esc(s)}</div></div>`).join("")}</div>
-        </section>
-        <section class="card">
-          <h2>Common mistakes</h2>
-          <ul>${eq.mistakes.map((m) => `<li class="muted">${esc(m)}</li>`).join("")}</ul>
-          <div class="grid two" style="margin-top:12px">
-            <label class="field"><span>Minutes</span><input id="wo-min" type="number" value="${eq.minutes}" /></label>
-            <label class="field"><span>Effort</span>
-              <select id="wo-effort"><option value="easy">Easy</option><option value="steady" selected>Steady</option><option value="hard">Hard</option></select>
-            </label>
-          </div>
-          <div class="btn-row">
-            <button class="btn btn-primary" data-act="log-eq" data-id="${eq.id}">I finished this</button>
-            <button class="btn" data-act="mark-tutorial" data-id="${eq.id}">Mark tutorial watched</button>
-          </div>
-        </section>
-      </div>`;
-  }
-
-  function logEquipment(id) {
-    const eq = D.EQUIPMENT.find((e) => e.id === id);
-    if (!eq) return;
-    const minutes = Number((document.getElementById("wo-min") || {}).value) || eq.minutes;
-    const effort = (document.getElementById("wo-effort") || {}).value || "steady";
-    const kcal = E.workoutKcal(eq, minutes, effort);
-    S.addWorkout(state, {
-      id: `wo-${Date.now()}`,
-      at: new Date().toISOString(),
-      equipmentId: eq.id,
-      name: eq.name,
-      minutes,
-      effort,
-      kcal
-    });
+    if (!eq) return renderWorkout();
     if (!state.tutorials.includes(eq.id)) state.tutorials.push(eq.id);
     persist();
-    toast(`Logged ${eq.name} · ${kcal} kcal out.`);
-    go("#/");
+    root.innerHTML = shell("workout", `<section class="card">
+      <div class="video-ph"><div><b>Tutorial</b><p class="tiny">Video slot ready — connect a real source later. No fake links.</p></div></div>
+      <h2>${esc(eq.name)}</h2>
+      <p class="muted">${esc(eq.summary)}</p>
+      <h3 style="margin:14px 0 8px">How to use it</h3>
+      <div class="steps">${eq.steps.map((s) => `<div class="step"><div>${esc(s)}</div></div>`).join("")}</div>
+      <h3 style="margin:14px 0 8px">Common mistakes</h3>
+      <ul>${eq.mistakes.map((m) => `<li class="muted">${esc(m)}</li>`).join("")}</ul>
+      <a class="btn btn-primary btn-wide" href="#/workout" style="margin-top:14px;display:block;text-align:center">Back to workout</a>
+    </section>`);
   }
 
-  function renderPlan() {
-    const current = (state.routines || [])[0];
-    root.innerHTML = `${topbar("Today's plan")}
-      ${nav("plan")}
-      <div class="main grid">
-        <section class="card">
-          <h2>Smart routine generator</h2>
-          <p class="muted">Tell us the goal and the time you actually have. We keep it beginner-simple.</p>
-          <p class="tiny" style="margin-top:10px">Goal</p>
-          <div class="chips">
-            ${[["balanced", "Balanced"], ["strength", "Strength"], ["cardio", "Cardio"], ["confidence", "Gym confidence"]].map(([id, label]) =>
-              `<button class="chip ${(state.planGoal || "balanced") === id ? "active" : ""}" data-act="plan-goal" data-id="${id}">${label}</button>`).join("")}
-          </div>
-          <p class="tiny" style="margin-top:10px">Minutes</p>
-          <div class="chips">
-            ${[20, 30, 45, 60].map((n) =>
-              `<button class="chip ${(state.planMin || 30) === n ? "active" : ""}" data-act="plan-min" data-n="${n}">${n}</button>`).join("")}
-          </div>
-          <p class="tiny" style="margin-top:10px">Where</p>
-          <div class="chips">
-            <button class="chip ${(state.planSetting || "gym") === "gym" ? "active" : ""}" data-act="plan-set" data-id="gym">Full gym</button>
-            <button class="chip ${state.planSetting === "home" ? "active" : ""}" data-act="plan-set" data-id="home">Home / dumbbells</button>
-          </div>
-          <button class="btn btn-primary btn-wide" data-act="make-plan" style="margin-top:14px">Generate today's routine</button>
-        </section>
-        ${current ? `<section class="card">
-          <div class="row"><h2>Your session</h2><span class="tiny">${current.totals.minutes} min · ${current.totals.kcal} kcal</span></div>
-          <div class="list">${current.blocks.map((b, i) =>
-            `<div class="list-item"><div>${b.done ? "✅" : "▫️"}</div><div><b>${esc(b.name)}</b><div class="tiny">${b.minutes} min · ${b.kcal} kcal</div></div><div class="btn-row"><a class="chip" href="#/gym/${b.equipmentId}">Guide</a><button class="chip" data-act="toggle-block" data-i="${i}">${b.done ? "Undo" : "Done"}</button></div></div>`
-          ).join("")}</div>
-          <button class="btn btn-wide" data-act="finish-routine" style="margin-top:12px">Save completed session</button>
-        </section>` : ""}
-      </div>`;
-  }
-
-  function renderYou() {
-    const t = state.targets || {};
-    const days = E.uniqueDays(state.meals.map((m) => m.at).concat(state.workouts.map((w) => w.at)));
-    root.innerHTML = `${topbar("You")}
-      ${nav("you")}
-      <div class="main grid">
-        <section class="card">
-          <h2>${esc(state.profile.name)}</h2>
-          <p class="muted">${esc(state.profile.goal)} · ${t.calories} kcal target · ${days.length} active days</p>
-          <div class="btn-row" style="margin-top:10px">
-            <button class="btn" data-act="notify">Enable reminders</button>
-            <a class="btn" href="#/welcome">Homepage</a>
-            <a class="btn" href="#/challenges">Challenges</a>
-            <a class="btn" href="#/history">History</a>
-          </div>
-        </section>
-        <section class="card">
-          <h2>Habit reminders</h2>
-          <p class="muted">Nudges fire while the app is open. On a phone, add this page to the home screen so it is one tap away.</p>
-          <div class="list" style="margin-top:10px">${state.reminders.map((r) =>
-            `<div class="list-item"><div>⏰</div><div><b>${esc(r.label)}</b><div class="tiny">${esc(r.time)}</div></div><button class="chip ${r.enabled ? "active" : ""}" data-act="tog-rem" data-id="${r.id}">${r.enabled ? "On" : "Off"}</button></div>`
-          ).join("")}</div>
-        </section>
-        <section class="card">
-          <h2>Settings</h2>
-          <div class="btn-row">
-            <button class="btn" data-act="theme">Toggle ${state.theme === "light" ? "dark" : "light"} mode</button>
-            <button class="btn" data-act="export">Download my data</button>
-            <button class="btn" data-act="reset">Reset app</button>
-          </div>
-          <p class="tiny" style="margin-top:10px">Estimates are educational, not medical advice.</p>
-        </section>
-      </div>`;
-  }
-
-  function renderHistory() {
-    const meals = state.meals.slice(0, 30);
-    const workouts = state.workouts.slice(0, 30);
-    root.innerHTML = `${topbar("History")}
-      ${nav("you")}
-      <div class="main grid">
-        <section class="card"><h2>Meals</h2>${meals.length ? `<div class="list">${meals.map((m) =>
-          `<div class="list-item"><div>🍽️</div><div><b>${esc(m.slot)}</b><div class="tiny">${esc(m.at.slice(0, 10))} · ${esc((m.items || []).map((i) => i.name).join(", "))}</div></div><b>${m.kcal}</b></div>`
-        ).join("")}</div>` : `<p class="muted">Nothing logged yet.</p>`}</section>
-        <section class="card"><h2>Workouts</h2>${workouts.length ? `<div class="list">${workouts.map((w) =>
-          `<div class="list-item"><div>🏋️</div><div><b>${esc(w.name)}</b><div class="tiny">${esc(w.at.slice(0, 10))} · ${w.minutes} min</div></div><b>${w.kcal}</b></div>`
-        ).join("")}</div>` : `<p class="muted">No workouts yet. Open Gym and finish a tutorial.</p>`}</section>
-      </div>`;
-  }
-
-  function renderChallenges() {
-    const you = {
-      name: state.profile.name,
-      streak: E.streakFromDays(E.uniqueDays(state.meals.map((m) => m.at))),
-      meals: state.meals.length,
-      workouts: state.workouts.length
-    };
-    const board = [{ ...you, id: "you", city: "You" }].concat(D.FRIENDS).sort((a, b) => b.streak - a.streak || b.meals - a.meals);
-    root.innerHTML = `${topbar("Challenges")}
-      ${nav("you")}
-      <div class="main grid">
-        <section class="card">
-          <h2>This week's boards</h2>
-          <div class="list">${D.CHALLENGES.map((c) => {
-            const on = (state.joinedChallenges || []).includes(c.id);
-            return `<div class="list-item"><div>🏁</div><div><b>${esc(c.name)}</b><div class="tiny">${esc(c.detail)}</div></div><button class="chip ${on ? "active" : ""}" data-act="join" data-id="${c.id}">${on ? "Joined" : "Join"}</button></div>`;
-          }).join("")}</div>
-        </section>
-        <section class="card">
-          <h2>Friend streak board</h2>
-          <div class="list">${board.map((p, i) =>
-            `<div class="list-item"><div>#${i + 1}</div><div><b>${esc(p.name)}</b><div class="tiny">${esc(p.city || "")} · ${p.meals} meals</div></div><b>${p.streak}🔥</b></div>`
-          ).join("")}</div>
-        </section>
-      </div>`;
-  }
-
-  function exportData() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "calorie-capture-data.json";
-    a.click();
-  }
-
-  async function enableReminders() {
-    if (!("Notification" in window)) {
-      toast("This browser cannot show system notifications. In-app reminders still run.");
-      return;
+  function renderProgress() {
+    const week = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const key = E.todayKey(d);
+      week.push({ label: d.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 2), on: state.activityDays.includes(key) });
     }
-    const perm = await Notification.requestPermission();
-    toast(perm === "granted" ? "Reminders on. Keep the app open or pinned." : "Permission denied. Toggles still work in-app.");
+    const workoutsWeek = state.workouts.filter((w) => (Date.now() - new Date(w.at).getTime()) < 8 * 86400000).length;
+    const avg = Math.round(state.meals.slice(0, 7).reduce((s, m) => s + m.kcal, 0) / Math.max(1, Math.min(7, state.meals.length)));
+    root.innerHTML = shell("progress", `<section class="card"><h2>Weekly consistency</h2>
+      <div class="week">${week.map((d) => `<div><i class="${d.on ? "on" : ""}">${d.on ? "✓" : "—"}</i><div class="tiny">${esc(d.label)}</div></div>`).join("")}</div></section>
+      <div class="grid two" style="margin-top:12px">
+        <section class="card"><h2>Calories</h2><b style="font-size:1.6rem">${avg}</b><p class="tiny">Weekly average logged</p></section>
+        <section class="card"><h2>Workouts</h2><b style="font-size:1.6rem">${workoutsWeek} / 5</b><p class="tiny">Completed this week</p></section>
+        <section class="card"><h2>Points</h2><b style="font-size:1.6rem">${state.points} XP</b></section>
+        <section class="card"><h2>Streak</h2><b style="font-size:1.6rem">${state.streak} days</b><p class="tiny">Meaningful activity — a meal or a set.</p></section>
+      </div>`);
   }
 
-  function checkReminders() {
-    const due = E.reminderDue(state.reminders);
-    due.forEach((r) => {
-      const key = `${E.todayKey()}-${r.id}`;
-      if (state.lastNotify[key]) return;
-      state.lastNotify[key] = true;
-      persist();
-      toast(r.label);
-      if (window.Notification && Notification.permission === "granted") {
-        try { new Notification("CalorieCapture", { body: r.label, icon: "assets/icon-192.png" }); } catch (err) { /* ignore */ }
-      }
-    });
+  function renderFriends() {
+    const q = (state.friendQuery || "").toLowerCase();
+    const hits = D.PEOPLE.filter((p) => !state.friends.includes(p.id) && (`${p.name} ${p.username}`.toLowerCase().includes(q)));
+    root.innerHTML = shell("friends", `<section class="card"><h2>Your circle</h2>
+      ${circleList()}</section>
+      <section class="card" style="margin-top:12px"><h2>Add friends</h2>
+        <input class="search" id="fq" placeholder="Search username" value="${esc(state.friendQuery || "")}">
+        ${hits.slice(0, 5).map((p) => `<div class="friend"><div class="av">${esc(p.name[0])}</div><div><b>${esc(p.name)}</b><div class="tiny">@${esc(p.username)}</div></div>
+          <button class="chip" data-act="request" data-id="${p.id}">${state.outgoing.includes(p.id) ? "Sent" : "Add"}</button></div>`).join("")}
+      </section>
+      ${state.requests.length ? `<section class="card" style="margin-top:12px"><h2>Requests</h2>${state.requests.map((r) => {
+        const p = peopleById(r.from); if (!p) return "";
+        return `<div class="friend"><div class="av">${esc(p.name[0])}</div><div><b>${esc(p.name)}</b></div>
+          <div class="btn-row"><button class="chip on" data-act="accept" data-id="${p.id}">Accept</button></div></div>`;
+      }).join("")}</section>` : ""}`);
+    const input = document.getElementById("fq");
+    if (input) input.addEventListener("input", (e) => { state.friendQuery = e.target.value; renderFriends(); });
+  }
+
+  function renderProfile() {
+    const p = state.profile;
+    root.innerHTML = shell("profile", `<section class="card">
+      <h2>${esc(p.name)}</h2>
+      <p class="muted">@${esc(p.username)} · ${esc(persona().name)}</p>
+      <div class="btn-row" style="margin-top:10px">
+        <a class="btn" href="#/progress">Progress</a>
+        <a class="btn" href="#/customize">Customize</a>
+      </div>
+    </section>
+    <section class="card" style="margin-top:12px"><h2>Persona</h2>
+      <div class="btn-row">${D.PERSONAS.map((x) =>
+        `<button class="chip ${p.persona === x.id ? "on" : ""}" data-act="persona" data-id="${x.id}">${x.emoji} ${esc(x.name)}</button>`
+      ).join("")}</div></section>
+    <section class="card" style="margin-top:12px"><h2>Daily target</h2>
+      <label class="field"><span>Calories</span><input id="cal" type="number" value="${state.targets.calories}"></label>
+      <button class="btn btn-primary" data-act="save-target">Save target</button>
+    </section>
+    <section class="card" style="margin-top:12px">
+      <button class="btn" data-act="demo">Reload demo day</button>
+      <button class="btn" data-act="fresh">Start over</button>
+    </section>`);
+  }
+
+  function renderCustomize() {
+    const cards = [
+      ["goal", "Calorie ring"], ["score", "Score + streak"], ["plan", "Today's plan"], ["meals", "Plates"], ["circle", "Circle"]
+    ];
+    root.innerHTML = shell("profile", `<section class="card"><h2>Dashboard cards</h2>
+      ${cards.map(([id, label]) =>
+        `<div class="row" style="margin:8px 0"><span>${esc(label)}</span>
+          <button class="chip ${state.dashCards.includes(id) ? "on" : ""}" data-act="card" data-id="${id}">${state.dashCards.includes(id) ? "On" : "Off"}</button></div>`
+      ).join("")}</section>`);
   }
 
   function render() {
-    applyTheme();
     const r = route();
-    root.className = "app";
-    if (r.name === "welcome" || (!state.profile && r.name !== "onboarding")) {
-      renderWelcome();
-      return;
-    }
-    if (r.name === "onboarding") {
-      if (!state.draftProfile) state.draftProfile = { name: "", age: 34, sex: "male", goal: "lose", activity: "sedentary", weight: 190, weightUnit: "lb", height: 70, heightUnit: "in" };
-      renderOnboarding();
+    if (!state.onboarded && r.name !== "onboarding") {
+      renderOnboard();
       return;
     }
     const views = {
       home: renderHome,
-      log: renderLog,
-      gym: () => (r.id ? renderTutorial(r.id) : renderGym()),
-      tutorial: () => renderTutorial(r.id),
-      plan: renderPlan,
-      you: renderYou,
-      history: renderHistory,
-      challenges: renderChallenges
+      meals: renderMeals,
+      scan: renderScan,
+      log: renderScan,
+      workout: renderWorkout,
+      exercise: () => renderExercise(r.id),
+      equipment: () => renderEquipment(r.id),
+      progress: renderProgress,
+      friends: renderFriends,
+      profile: renderProfile,
+      customize: renderCustomize,
+      onboarding: renderOnboard
     };
     (views[r.name] || renderHome)();
   }
 
   root.addEventListener("click", (ev) => {
+    const scanBox = ev.target.closest(".scan");
+    if (scanBox && !ev.target.closest("input") && route().name !== "scan") { go("#/scan"); return; }
     const btn = ev.target.closest("[data-act]");
     if (!btn) return;
     const act = btn.dataset.act;
-    if (act === "start") {
-      state.seenWelcome = true;
-      persist();
-      if (state.profile) go("#/");
-      else go("#/onboarding");
-    }
-    if (act === "goto-today") go("#/");
-    if (act === "demo") startDemo();
-    if (act === "goal") {
-      state.draftProfile = collectOnboard();
-      state.draftProfile.goal = btn.dataset.id;
+    if (act === "scan") go("#/scan");
+    if (act === "goto-friends") go("#/friends");
+    if (act === "ob-opt") {
+      onboard[btn.dataset.key] = btn.dataset.id;
+      const n = document.getElementById("ob-name");
+      if (n) onboard.name = n.value;
       render();
     }
-    if (act === "activity") {
-      state.draftProfile = collectOnboard();
-      state.draftProfile.activity = btn.dataset.id;
+    if (act === "ob-next") {
+      const n = document.getElementById("ob-name");
+      if (n) onboard.name = n.value;
+      if (onboard.step < 4) onboard.step += 1;
+      else finishOnboard();
       render();
     }
-    if (act === "finish-onboard") finishOnboard(collectOnboard());
-    if (act === "theme") {
-      state.theme = state.theme === "light" ? "dark" : "light";
-      persist();
-      render();
-    }
-    if (act === "water") {
-      const n = Number(btn.dataset.n);
-      const current = S.waterFor(state, E.todayKey());
-      S.setWater(state, E.todayKey(), current === n ? n - 1 : n);
-      render();
-    }
-    if (act === "plate") {
-      draft.plateId = btn.dataset.id;
-      if (draft.analysis) {
-        const historyNames = state.meals.slice(0, 12).flatMap((m) => (m.items || []).map((i) => i.name));
-        draft.analysis = E.analyzeMeal({
-          shares: draft.analysis.shares || {},
-          plateId: draft.plateId,
-          hour: new Date().getHours(),
-          historyNames
-        });
-        draft.items = draft.analysis.items.map((item) => Object.assign({}, item));
-      }
-      render();
-    }
-    if (act === "slot") { draft.slot = btn.dataset.id; render(); }
-    if (act === "add-food") {
-      const food = D.FOODS.find((f) => f.id === btn.dataset.id);
-      if (food) draft.items.push(E.scaleItem(food, 1, 1));
-      render();
-    }
-    if (act === "rm-item") {
-      draft.items.splice(Number(btn.dataset.i), 1);
-      render();
-    }
+    if (act === "ob-back") { onboard.step = Math.max(0, onboard.step - 1); render(); }
+    if (act === "demo") { state = S.seedDemo(); go("#/"); render(); }
+    if (act === "fresh") { state = S.reset(); onboard.step = 0; go("#/onboarding"); render(); }
     if (act === "save-meal") saveMeal();
-    if (act === "log-eq") logEquipment(btn.dataset.id);
-    if (act === "mark-tutorial") {
-      if (!state.tutorials.includes(btn.dataset.id)) state.tutorials.push(btn.dataset.id);
-      persist();
-      toast("Tutorial marked. That counts toward gym confidence.");
+    if (act === "set") completeSet(btn.dataset.ex, Number(btn.dataset.i));
+    if (act === "request") {
+      if (!state.outgoing.includes(btn.dataset.id)) state.outgoing.push(btn.dataset.id);
+      persist(); render();
     }
-    if (act === "plan-goal") { state.planGoal = btn.dataset.id; persist(); render(); }
-    if (act === "plan-min") { state.planMin = Number(btn.dataset.n); persist(); render(); }
-    if (act === "plan-set") { state.planSetting = btn.dataset.id; persist(); render(); }
-    if (act === "make-plan") {
-      const routine = E.generateRoutine({
-        goal: state.planGoal || "balanced",
-        minutes: state.planMin || 30,
-        setting: state.planSetting || "gym",
-        experience: "beginner"
-      });
-      state.routines = [routine];
-      persist();
+    if (act === "accept") {
+      state.friends.push(btn.dataset.id);
+      state.requests = state.requests.filter((r) => r.from !== btn.dataset.id);
+      persist(); render();
+    }
+    if (act === "persona") { state.profile.persona = btn.dataset.id; persist(); render(); }
+    if (act === "save-target") {
+      state.targets.calories = Number(document.getElementById("cal").value) || state.targets.calories;
+      persist(); render();
+    }
+    if (act === "card") {
+      const id = btn.dataset.id;
+      if (state.dashCards.includes(id)) state.dashCards = state.dashCards.filter((x) => x !== id);
+      else state.dashCards.push(id);
+      persist(); render();
+    }
+    if (act === "grams") {
+      const i = Number(btn.dataset.i);
+      const food = D.FOODS.find((f) => f.id === draft.items[i].id);
+      let g = btn.value;
+      if (g === "custom") g = prompt("Grams?", draft.items[i].grams) || draft.items[i].grams;
+      draft.items[i] = Object.assign(E.scaleByGrams(food, Number(g)), { approx: true });
+      draft.totals = E.sumMacros(draft.items);
       render();
-    }
-    if (act === "toggle-block") {
-      const routine = state.routines[0];
-      if (!routine) return;
-      routine.blocks[Number(btn.dataset.i)].done = !routine.blocks[Number(btn.dataset.i)].done;
-      persist();
-      render();
-    }
-    if (act === "finish-routine") {
-      const routine = state.routines[0];
-      if (!routine) return;
-      routine.blocks.forEach((b) => {
-        if (!b.done) return;
-        const eq = D.EQUIPMENT.find((e) => e.id === b.equipmentId);
-        S.addWorkout(state, {
-          id: `wo-${Date.now()}-${b.equipmentId}`,
-          at: new Date().toISOString(),
-          equipmentId: b.equipmentId,
-          name: b.name,
-          minutes: b.minutes,
-          effort: "steady",
-          kcal: b.kcal
-        });
-        if (eq && !state.tutorials.includes(eq.id)) state.tutorials.push(eq.id);
-      });
-      state.completedRoutine = true;
-      persist();
-      toast("Session saved to calories out.");
-      go("#/");
-    }
-    if (act === "join") {
-      if (!state.joinedChallenges.includes(btn.dataset.id)) state.joinedChallenges.push(btn.dataset.id);
-      persist();
-      render();
-    }
-    if (act === "tog-rem") {
-      const rem = state.reminders.find((r) => r.id === btn.dataset.id);
-      if (rem) rem.enabled = !rem.enabled;
-      persist();
-      render();
-    }
-    if (act === "notify") enableReminders();
-    if (act === "export") exportData();
-    if (act === "reset") {
-      if (confirm("Reset CalorieCapture on this device?")) {
-        state = S.reset();
-        go("#/");
-        render();
-      }
     }
   });
 
   window.addEventListener("hashchange", render);
-  applyTheme();
   render();
-  setInterval(checkReminders, 20000);
-
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js?v=4").catch(() => {});
   }
 })();

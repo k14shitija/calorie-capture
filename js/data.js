@@ -451,7 +451,43 @@
     "Busy days still count. Log the takeout. Then go walk."
   ];
 
-  const DATA = { FOODS, PLATE_SIZES, MEAL_SLOTS, EQUIPMENT, BADGES, FRIENDS, CHALLENGES, QUOTES };
+  const XP = { set: 20, exercise: 50, workout: 150, meal: 25, withinTarget: 100, dailyGoal: 200 };
+
+  const PERSONAS = [
+    { id: "challenger", emoji: "🔥", name: "The Challenger", line: "Competition and ranks keep you honest.", focus: ["points", "circle", "streak"] },
+    { id: "beginner", emoji: "🌱", name: "The Beginner", line: "Clear next steps. No shame. Machines explained.", focus: ["guide", "plan", "meals"] },
+    { id: "builder", emoji: "💪", name: "The Builder", line: "Strength, protein, and progressive work.", focus: ["workout", "protein", "plan"] },
+    { id: "balanced", emoji: "🧘", name: "The Balanced One", line: "Sustainable habits beat heroic weeks.", focus: ["recovery", "meals", "streak"] },
+    { id: "consistency", emoji: "⚡", name: "The Consistency Seeker", line: "Show up. Log it. Tomorrow gets easier.", focus: ["streak", "meals", "plan"] }
+  ];
+
+  const GOALS = [
+    { id: "lose", label: "Lose weight" },
+    { id: "muscle", label: "Build muscle" },
+    { id: "stronger", label: "Get stronger" },
+    { id: "endurance", label: "Improve endurance" },
+    { id: "healthy", label: "Stay healthy" },
+    { id: "consistency", label: "Build consistency" }
+  ];
+
+  const EXERCISES = [
+    { id: "shoulder-press-db", name: "Dumbbell Shoulder Press", muscles: ["Shoulders", "Triceps"], equipmentId: "shoulder-press", sets: 3, reps: 10, weight: 15, rest: 60 },
+    { id: "lat-pulldown-ex", name: "Lat Pulldown", muscles: ["Lats", "Biceps"], equipmentId: "lat-pulldown", sets: 3, reps: 10, weight: 40, rest: 60 },
+    { id: "chest-press-ex", name: "Chest Press", muscles: ["Chest", "Triceps"], equipmentId: "chest-press", sets: 3, reps: 10, weight: 35, rest: 60 },
+    { id: "seated-row-ex", name: "Seated Row", muscles: ["Back", "Biceps"], equipmentId: "seated-row", sets: 3, reps: 10, weight: 40, rest: 60 },
+    { id: "db-bench-ex", name: "Dumbbell Bench Press", muscles: ["Chest", "Shoulders"], equipmentId: "dumbbell-bench", sets: 3, reps: 8, weight: 20, rest: 75 },
+    { id: "plank-ex", name: "Plank", muscles: ["Core"], equipmentId: "plank", sets: 3, reps: 30, weight: 0, rest: 45, unit: "sec" }
+  ];
+
+  const PEOPLE = [
+    { id: "sarah", username: "sarahk", name: "Sarah Kim", streak: 12, points: 1640, workoutsWeek: 4, activity: "Logged lunch" },
+    { id: "alex", username: "alexr", name: "Alex Rivera", streak: 5, points: 840, workoutsWeek: 3, activity: "Finished upper body" },
+    { id: "maya", username: "mayachen", name: "Maya Chen", streak: 8, points: 1210, workoutsWeek: 5, activity: "5 workouts this week" },
+    { id: "leo", username: "leorun", name: "Leo Ramirez", streak: 4, points: 720, workoutsWeek: 3, activity: "Rowed 10 min" },
+    { id: "priya", username: "priyafit", name: "Priya Shah", streak: 9, points: 1500, workoutsWeek: 4, activity: "Hit protein target" }
+  ];
+
+  const DATA = { FOODS, PLATE_SIZES, MEAL_SLOTS, EQUIPMENT, BADGES, FRIENDS, CHALLENGES, QUOTES, XP, PERSONAS, GOALS, EXERCISES, PEOPLE };
   root.CC_DATA = DATA;
   if (typeof module !== "undefined" && module.exports) module.exports = DATA;
 })(typeof globalThis !== "undefined" ? globalThis : this);
